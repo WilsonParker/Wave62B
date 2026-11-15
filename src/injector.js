@@ -187,13 +187,30 @@
     return out;
   }
 
+  const DEVICE_LABELS = ['device', '\uC7A5\uCE58', 'dispositivo', '\u30C7\u30D0\u30A4\u30B9', '\u8BBE\u5907', '\u8A2D\u5099'];
+  const MAX_BOX_TEXTS = 60;
+
   function findChannelValue() {
-    for (const { el, t } of textNodes(document.body)) {
+    const nodes = textNodes(document.body);
+    for (const { el, t } of nodes) {
       if (!CHANNEL_LABELS.includes(t.toLowerCase())) continue;
       let box = el.parentElement;
-      for (let i = 0; i < 4 && box; i++, box = box.parentElement) {
-        const v = textNodes(box).find(x => x.el !== el && CHANNEL_TEXT[x.t.toLowerCase()]);
+      for (let i = 0; i < 8 && box; i++, box = box.parentElement) {
+        const inBox = textNodes(box);
+        if (inBox.length > MAX_BOX_TEXTS) break;
+        const v = inBox.find(x => x.el !== el && CHANNEL_TEXT[x.t.toLowerCase()]);
         if (v) return { label: el, channel: v.t.toLowerCase() };
+      }
+    }
+    for (const { el, t } of nodes) {
+      if (!CHANNEL_TEXT[t.toLowerCase()]) continue;
+      let box = el.parentElement;
+      for (let i = 0; i < 6 && box; i++, box = box.parentElement) {
+        const inBox = textNodes(box);
+        if (inBox.length > MAX_BOX_TEXTS) break;
+        if (inBox.some(x => DEVICE_LABELS.includes(x.t.toLowerCase()))) {
+          return { label: el, channel: t.toLowerCase() };
+        }
       }
     }
     return null;
@@ -505,8 +522,44 @@
       '<div class="bico-channel-sub">' + sub + '</div>' + extraHtml);
   }
 
+  function collectDiagnostics() {
+    const describe = el => {
+      const chain = [];
+      for (let e = el, i = 0; e && i < 8; e = e.parentElement, i++) {
+        chain.push(e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : ''));
+      }
+      return chain.join(' < ');
+    };
+    const hits = textNodes(document.body)
+      .filter(x => CHANNEL_LABELS.includes(x.t.toLowerCase()) || CHANNEL_TEXT[x.t.toLowerCase()] || DEVICE_LABELS.includes(x.t.toLowerCase()))
+      .slice(0, 8)
+      .map(x => {
+        let box = x.el;
+        for (let i = 0; i < 3 && box.parentElement; i++) box = box.parentElement;
+        return { text: x.t, chain: describe(x.el), html: box.outerHTML.slice(0, 1500) };
+      });
+    const shadowHosts = Array.from(document.querySelectorAll('*')).filter(e => e.shadowRoot).length;
+    return JSON.stringify({
+      url: location.pathname,
+      iframes: document.querySelectorAll('iframe').length,
+      shadowHosts,
+      textNodeCount: textNodes(document.body).length,
+      hits,
+    }, null, 2);
+  }
+
   function renderOrderNote() {
-    setSection('order', ORDER_TITLE, '', '<div class="bico-note">\uAD6C\uB9E4 \uCC44\uB110(CHANNEL)\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4</div>');
+    setSection('order', ORDER_TITLE, '',
+      '<div class="bico-note">\uAD6C\uB9E4 \uCC44\uB110(CHANNEL)\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4</div>' +
+      '<button class="bico-diag-btn">\uC9C4\uB2E8 \uC815\uBCF4 \uBCF5\uC0AC</button>');
+    const btn = document.querySelector('#bico-panel .bico-diag-btn');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      navigator.clipboard.writeText(collectDiagnostics()).then(
+        () => { btn.textContent = '\uBCF5\uC0AC\uB428 - \uB300\uD654\uCC3D\uC5D0 \uBD99\uC5EC\uB123\uC5B4 \uC8FC\uC138\uC694'; },
+        () => { btn.textContent = '\uBCF5\uC0AC \uC2E4\uD328'; }
+      );
+    });
   }
 
   function renderCasesNote(message) {
@@ -701,6 +754,15 @@
       .bico-sec-min:hover { color: #000; }
       .bico-sec-body { padding: 12px 14px 8px; }
       .bico-note { color: #888; font-size: 12px; padding-bottom: 4px; }
+      .bico-diag-btn {
+        margin: 4px 0 6px;
+        padding: 4px 10px;
+        border: 1px solid #ccc;
+        background: #fff;
+        border-radius: 4px;
+        font-size: 11px;
+        cursor: pointer;
+      }
       .bico-channel-main { font-size: 16px; font-weight: 700; }
       .bico-channel-sub { font-size: 11px; color: #888; margin-top: 2px; padding-bottom: 4px; }
       .bico-warn {
