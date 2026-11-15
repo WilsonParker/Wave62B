@@ -161,6 +161,33 @@
     return { counts, total, cutoff: oneYearAgo };
   }
 
+  const panelState = { left: null, top: 80, minimized: false };
+
+  function enableDrag(panel, handle) {
+    handle.addEventListener('mousedown', function (e) {
+      if (e.target.closest('button')) return;
+      const rect = panel.getBoundingClientRect();
+      const offX = e.clientX - rect.left;
+      const offY = e.clientY - rect.top;
+      e.preventDefault();
+
+      function onMove(ev) {
+        const maxLeft = window.innerWidth - panel.offsetWidth;
+        const maxTop = window.innerHeight - handle.offsetHeight;
+        panelState.left = Math.min(Math.max(0, ev.clientX - offX), Math.max(0, maxLeft));
+        panelState.top = Math.min(Math.max(0, ev.clientY - offY), Math.max(0, maxTop));
+        panel.style.left = panelState.left + 'px';
+        panel.style.top = panelState.top + 'px';
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
   function renderSummaryPanel(stats) {
     const existing = document.getElementById('bico-case-summary');
     if (existing) existing.remove();
@@ -175,6 +202,7 @@
       <div class="bico-panel-header">
         <span class="bico-panel-title">📊 Cases (최근 1년)</span>
         <span class="bico-panel-total">총 ${stats.total}건</span>
+        <button class="bico-panel-min" title="최소화">${panelState.minimized ? '▢' : '—'}</button>
         <button class="bico-panel-close" title="닫기">✕</button>
       </div>
       <div class="bico-panel-body">
@@ -210,18 +238,30 @@
       document.head.appendChild(style);
     }
 
-    const tabContent = findCasesTabContent();
-    if (tabContent) {
-      tabContent.insertBefore(panel, tabContent.firstChild);
-    } else {
-      document.body.appendChild(panel);
-      panel.style.position = 'fixed';
-      panel.style.top = '80px';
-      panel.style.right = '20px';
-      panel.style.zIndex = '999999';
-      panel.style.width = '420px';
-      panel.style.boxShadow = '0 4px 24px rgba(0,0,0,0.18)';
+    document.body.appendChild(panel);
+    panel.style.position = 'fixed';
+    panel.style.zIndex = '999999';
+    panel.style.width = '420px';
+    panel.style.boxShadow = '0 4px 24px rgba(0,0,0,0.18)';
+    panel.style.top = panelState.top + 'px';
+    if (panelState.left === null) {
+      panelState.left = Math.max(0, window.innerWidth - 420 - 20);
     }
+    panel.style.left = panelState.left + 'px';
+
+    const body = panel.querySelector('.bico-panel-body');
+    const minBtn = panel.querySelector('.bico-panel-min');
+    body.style.display = panelState.minimized ? 'none' : '';
+    minBtn.addEventListener('click', function () {
+      panelState.minimized = !panelState.minimized;
+      body.style.display = panelState.minimized ? 'none' : '';
+      minBtn.textContent = panelState.minimized ? '▢' : '—';
+      minBtn.title = panelState.minimized ? '펼치기' : '최소화';
+    });
+
+    const header = panel.querySelector('.bico-panel-header');
+    header.style.cursor = 'move';
+    enableDrag(panel, header);
 
     panel.querySelector('.bico-panel-close').addEventListener('click', () => panel.remove());
   }
@@ -303,6 +343,17 @@
         color: #aaa;
         margin-right: 4px;
       }
+      .bico-panel-min {
+        background: none;
+        border: none;
+        color: #aaa;
+        cursor: pointer;
+        font-size: 14px;
+        padding: 0 4px;
+        line-height: 1;
+      }
+      .bico-panel-min:hover { color: #fff; }
+      .bico-panel-header { user-select: none; }
       .bico-panel-close {
         background: none;
         border: none;
