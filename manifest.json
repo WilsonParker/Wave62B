@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "BICO Order Assistant",
+  "version": "1.0.0",
+  "description": "INDITEX BICO 주문 관리 보조 도구 - Cases 카테고리 통계",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://apps.inditex.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://apps.inditex.com/bico/*"],
+      "js": ["src/injector.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/interceptor.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
