@@ -20,16 +20,86 @@
   new MutationObserver(function () {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
-      onNavigate();
+      checkOrder();
     }
   }).observe(document, { subtree: true, childList: true });
 
-  function onNavigate() {
-    if (location.href.includes('cases')) {
-      setTimeout(tryDomFallback, 1000);
-    }
+  let currentOrder = null;
+  let renderedOrder = null;
+  let autoLoading = false;
+
+  function getOrderId() {
+    const m = location.pathname.match(/\/orders\/(\d+)/);
+    return m ? m[1] : null;
+  }
+
+  function getSelectedTab() {
+    return new URLSearchParams(location.search).get('selectedTab');
+  }
+
+  function checkOrder() {
+    const oid = getOrderId();
+    if (oid === currentOrder) return;
+    currentOrder = oid;
+    renderedOrder = null;
     const panel = document.getElementById('bico-case-summary');
     if (panel) panel.remove();
+    if (oid) autoLoadCases(oid);
+  }
+
+  function waitFor(fn, ms) {
+    return new Promise(resolve => {
+      const start = Date.now();
+      const timer = setInterval(() => {
+        const v = fn();
+        if (v || Date.now() - start > ms) {
+          clearInterval(timer);
+          resolve(v || null);
+        }
+      }, 200);
+    });
+  }
+
+  function findTab(name) {
+    const first = name.toLowerCase().split(' ')[0];
+    const exact = name.toLowerCase() === 'cases';
+    const panel = document.getElementById('bico-case-summary');
+    return Array.from(document.querySelectorAll('a, button, li, span, div, [role="tab"]')).find(el => {
+      if (el.children.length > 0 || el.offsetParent === null) return false;
+      if (panel && panel.contains(el)) return false;
+      const t = el.textContent.trim().toLowerCase();
+      return exact ? t === 'cases' : t.startsWith(first);
+    }) || null;
+  }
+
+  async function autoLoadCases(oid) {
+    if (autoLoading) return;
+    autoLoading = true;
+    try {
+      const sel = getSelectedTab();
+      if (sel === 'cases-tab') {
+        setTimeout(() => tryDomFallback(0), 1500);
+        return;
+      }
+      const casesTab = await waitFor(() => findTab('cases'), 15000);
+      if (!casesTab || getOrderId() !== oid) return;
+      const origName = (sel || '').replace(/-tab$/, '').replace(/-/g, ' ');
+      const origTab = origName ? findTab(origName) : null;
+      casesTab.click();
+      await waitFor(() => renderedOrder === oid, 6000);
+      if (getSelectedTab() === 'cases-tab' && getOrderId() === oid) {
+        if (origTab && origTab.isConnected) origTab.click();
+        else history.back();
+      }
+    } finally {
+      autoLoading = false;
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', checkOrder);
+  } else {
+    checkOrder();
   }
 
   function checkTabState() {
@@ -38,7 +108,7 @@
       if (btn.textContent.trim().toLowerCase() === 'cases' && !btn.__bicoListened) {
         btn.__bicoListened = true;
         btn.addEventListener('click', function () {
-          setTimeout(tryDomFallback, 1500);
+          setTimeout(() => tryDomFallback(0), 1500);
         });
       }
     });
@@ -49,17 +119,13 @@
     renderSummaryPanel(buildStats(cases));
   }
 
-  function tryDomFallback() {
-    const tables = document.querySelectorAll('table');
-    if (tables.length === 0) {
-      setTimeout(tryDomFallback, 1000);
-      return;
-    }
-    const cases = parseDomCases(tables);
+  function tryDomFallback(attempt) {
+    if (renderedOrder === getOrderId() && renderedOrder !== null) return;
+    const cases = parseDomCases(document.querySelectorAll('table'));
     if (cases.length > 0) {
       renderSummaryPanel(buildStats(cases));
-    } else {
-      setTimeout(tryDomFallback, 1000);
+    } else if (attempt < 8) {
+      setTimeout(() => tryDomFallback(attempt + 1), 1000);
     }
   }
 
@@ -193,6 +259,7 @@
     if (existing) existing.remove();
 
     if (stats.total === 0) return;
+    renderedOrder = getOrderId();
 
     const sorted = Object.entries(stats.counts).sort((a, b) => b[1] - a[1]);
 
