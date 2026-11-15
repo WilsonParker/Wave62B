@@ -6,6 +6,51 @@
   };
   (document.head || document.documentElement).appendChild(script);
 
+  const LANG_GUARD_KEY = '__bico_lang_guard';
+  const LANG_MAX_TRIES = 2;
+  const LANG_WINDOW_MS = 60000;
+
+  function getLocaleCookie() {
+    const m = document.cookie.match(/(?:^|;\s*)locale=([^;]*)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  function langGuardAllows() {
+    let g;
+    try { g = JSON.parse(sessionStorage.getItem(LANG_GUARD_KEY)); } catch (_) { g = null; }
+    const now = Date.now();
+    if (!g || now - g.t > LANG_WINDOW_MS) g = { n: 0, t: now };
+    if (g.n >= LANG_MAX_TRIES) return false;
+    g.n += 1;
+    sessionStorage.setItem(LANG_GUARD_KEY, JSON.stringify(g));
+    return true;
+  }
+
+  let enforcing = false;
+  let langTimer = null;
+  function enforceLanguage() {
+    if (!chrome.runtime || !chrome.runtime.id) {
+      clearInterval(langTimer);
+      return;
+    }
+    if (enforcing) return;
+    chrome.storage.sync.get({ locale: '', enabled: true }, function (s) {
+      const desired = (s.locale || '').trim();
+      if (!s.enabled || !desired) return;
+      const current = getLocaleCookie();
+      if (current === null || current.toLowerCase() === desired.toLowerCase()) return;
+      if (!langGuardAllows()) return;
+      enforcing = true;
+      chrome.runtime.sendMessage({ type: 'setLocale', locale: desired }, function (res) {
+        if (res && res.ok) location.reload();
+        else enforcing = false;
+      });
+    });
+  }
+
+  enforceLanguage();
+  langTimer = setInterval(enforceLanguage, 3000);
+
   window.addEventListener('__bico_cases__', function (e) {
     handleCasesData(e.detail);
   });
