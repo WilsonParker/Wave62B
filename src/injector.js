@@ -83,20 +83,14 @@
   }
 
   function checkOrder() {
+    if (!panelEnabled) return;
     const oid = getOrderId();
     if (oid === currentOrder) return;
     currentOrder = oid;
     renderedOrder = null;
-    lastOrderKey = null;
     dismissedOrder = null;
     if (document.getElementById('bico-panel')) renderCasesNote('Cases \uBD88\uB7EC\uC624\uB294 \uC911...');
     if (oid) {
-      waitFor(() => {
-        updateOrderSection();
-        return document.querySelector('#bico-panel [data-section="order"]') || getOrderId() !== oid;
-      }, 15000).then(found => {
-        if (!found && getOrderId() === oid) renderOrderNote();
-      });
       autoLoadCases(oid);
     }
   }
@@ -153,103 +147,34 @@
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', checkOrder);
-  } else {
-    checkOrder();
-  }
+  let panelEnabled = false;
 
-  const CHANNEL_LABELS = ['channel', '채널', 'canal', 'チャネル', '渠道', '频道'];
-  const CHANNEL_TEXT = {
-    app: '앱에서 구매',
-    web: '온라인',
-    store: '아이팟세일즈',
-  };
-
-  function ownText(el) {
-    return Array.from(el.childNodes)
-      .filter(n => n.nodeType === Node.TEXT_NODE)
-      .map(n => n.textContent)
-      .join('')
-      .trim();
-  }
-
-  function textNodes(root) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const out = [];
-    let n;
-    while ((n = walker.nextNode())) {
-      const t = n.textContent.trim();
-      if (t && n.parentElement && !n.parentElement.closest('#bico-panel')) {
-        out.push({ el: n.parentElement, t });
-      }
+  function applyPanelSetting(on) {
+    panelEnabled = on;
+    if (!on) {
+      const panel = document.getElementById('bico-panel');
+      if (panel) panel.remove();
+      return;
     }
-    return out;
-  }
-
-  const DEVICE_LABELS = ['device', '\uC7A5\uCE58', 'dispositivo', '\u30C7\u30D0\u30A4\u30B9', '\u8BBE\u5907', '\u8A2D\u5099'];
-  const MAX_BOX_TEXTS = 60;
-
-  function findChannelValue() {
-    const nodes = textNodes(document.body);
-    for (const { el, t } of nodes) {
-      if (!CHANNEL_LABELS.includes(t.toLowerCase())) continue;
-      let box = el.parentElement;
-      for (let i = 0; i < 8 && box; i++, box = box.parentElement) {
-        const inBox = textNodes(box);
-        if (inBox.length > MAX_BOX_TEXTS) break;
-        const v = inBox.find(x => x.el !== el && CHANNEL_TEXT[x.t.toLowerCase()]);
-        if (v) return { label: el, channel: v.t.toLowerCase() };
-      }
+    currentOrder = null;
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', checkOrder, { once: true });
+    } else {
+      checkOrder();
     }
-    for (const { el, t } of nodes) {
-      if (!CHANNEL_TEXT[t.toLowerCase()]) continue;
-      let box = el.parentElement;
-      for (let i = 0; i < 6 && box; i++, box = box.parentElement) {
-        const inBox = textNodes(box);
-        if (inBox.length > MAX_BOX_TEXTS) break;
-        if (inBox.some(x => DEVICE_LABELS.includes(x.t.toLowerCase()))) {
-          return { label: el, channel: t.toLowerCase() };
-        }
-      }
+  }
+
+  chrome.storage.sync.get({ panelEnabled: true }, function (s) {
+    applyPanelSetting(s.panelEnabled !== false);
+  });
+
+  chrome.storage.onChanged.addListener(function (changes, area) {
+    if (area === 'sync' && changes.panelEnabled) {
+      applyPanelSetting(changes.panelEnabled.newValue !== false);
     }
-    return null;
-  }
-
-  function findOriginalStoreId(label) {
-    let box = label.parentElement;
-    for (let i = 0; i < 6 && box; i++, box = box.parentElement) {
-      for (const { t } of textNodes(box)) {
-        // regex: "ID 16417" original store id
-        const m = t.match(/^ID\s*(\d+)$/i);
-        if (m) return m[1];
-      }
-    }
-    return null;
-  }
-
-  function readChannelInfo() {
-    const found = findChannelValue();
-    if (!found) return null;
-    const storeId = found.channel === 'store' ? findOriginalStoreId(found.label) : null;
-    return { channel: found.channel, storeId };
-  }
-
-  let lastOrderKey = null;
-  function updateOrderSection() {
-    const oid = getOrderId();
-    if (!oid) return;
-    const info = readChannelInfo();
-    if (!info) return;
-    const key = oid + '|' + info.channel + '|' + info.storeId;
-    const sec = document.querySelector('#bico-panel [data-section="order"]');
-    if (key === lastOrderKey && sec) return;
-    lastOrderKey = key;
-    renderOrderSection(info);
-  }
+  });
 
   function checkTabState() {
-    updateOrderSection();
     const tabButtons = document.querySelectorAll('[class*="tab"], [role="tab"], button');
     tabButtons.forEach(btn => {
       if (btn.textContent.trim().toLowerCase() === 'cases' && !btn.__bicoListened) {
@@ -405,7 +330,7 @@
     return { counts, descs, total, cutoff: oneYearAgo };
   }
 
-  const panelState = { left: null, top: 80, min: { order: false, cases: false } };
+  const panelState = { left: null, top: 80, min: { cases: false } };
   let dismissedOrder = null;
 
   function enableDrag(panel, handle) {
@@ -434,6 +359,7 @@
   }
 
   function ensurePanel() {
+    if (!panelEnabled) return null;
     if (dismissedOrder !== null && dismissedOrder === getOrderId()) return null;
     let panel = document.getElementById('bico-panel');
     if (panel) return panel;
@@ -498,75 +424,21 @@
         apply();
       });
       apply();
-      if (name === 'order') container.insertBefore(sec, container.firstChild);
-      else container.appendChild(sec);
+      container.appendChild(sec);
     }
     sec.querySelector('.bico-sec-title').textContent = title;
     sec.querySelector('.bico-sec-extra').textContent = extra;
     sec.querySelector('.bico-sec-body').innerHTML = bodyHtml;
   }
 
-  const ORDER_TITLE = '\uD83D\uDED2 \uC8FC\uBB38';
   const CASES_TITLE = '\uD83D\uDCCA Cases (\uCD5C\uADFC 1\uB144)';
-
-  function renderOrderSection(info) {
-    const label = CHANNEL_TEXT[info.channel];
-    let sub = '\uC628\uB77C\uC778 \uC8FC\uBB38';
-    let extraHtml = '';
-    if (info.channel === 'store') {
-      sub = '\uB9E4\uC7A5 \uC8FC\uBB38 (IPOD SALES)' + (info.storeId ? ' \u00B7 \uB9E4\uC7A5 ID ' + escHtml(info.storeId) : '');
-      extraHtml = '<div class="bico-warn">\uB9E4\uC7A5 \uBC29\uBB38 \uAD50\uD658 \uBD88\uAC00 / \uACE0\uAC1D\uC13C\uD130 TARAS \uCC98\uB9AC \uBD88\uAC00</div>';
-    }
-    setSection('order', ORDER_TITLE, info.channel,
-      '<div class="bico-channel-main">' + escHtml(label) + '</div>' +
-      '<div class="bico-channel-sub">' + sub + '</div>' + extraHtml);
-  }
-
-  function collectDiagnostics() {
-    const describe = el => {
-      const chain = [];
-      for (let e = el, i = 0; e && i < 8; e = e.parentElement, i++) {
-        chain.push(e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : ''));
-      }
-      return chain.join(' < ');
-    };
-    const hits = textNodes(document.body)
-      .filter(x => CHANNEL_LABELS.includes(x.t.toLowerCase()) || CHANNEL_TEXT[x.t.toLowerCase()] || DEVICE_LABELS.includes(x.t.toLowerCase()))
-      .slice(0, 8)
-      .map(x => {
-        let box = x.el;
-        for (let i = 0; i < 3 && box.parentElement; i++) box = box.parentElement;
-        return { text: x.t, chain: describe(x.el), html: box.outerHTML.slice(0, 1500) };
-      });
-    const shadowHosts = Array.from(document.querySelectorAll('*')).filter(e => e.shadowRoot).length;
-    return JSON.stringify({
-      url: location.pathname,
-      iframes: document.querySelectorAll('iframe').length,
-      shadowHosts,
-      textNodeCount: textNodes(document.body).length,
-      hits,
-    }, null, 2);
-  }
-
-  function renderOrderNote() {
-    setSection('order', ORDER_TITLE, '',
-      '<div class="bico-note">\uAD6C\uB9E4 \uCC44\uB110(CHANNEL)\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4</div>' +
-      '<button class="bico-diag-btn">\uC9C4\uB2E8 \uC815\uBCF4 \uBCF5\uC0AC</button>');
-    const btn = document.querySelector('#bico-panel .bico-diag-btn');
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      navigator.clipboard.writeText(collectDiagnostics()).then(
-        () => { btn.textContent = '\uBCF5\uC0AC\uB428 - \uB300\uD654\uCC3D\uC5D0 \uBD99\uC5EC\uB123\uC5B4 \uC8FC\uC138\uC694'; },
-        () => { btn.textContent = '\uBCF5\uC0AC \uC2E4\uD328'; }
-      );
-    });
-  }
 
   function renderCasesNote(message) {
     setSection('cases', CASES_TITLE, '', '<div class="bico-note">' + escHtml(message) + '</div>');
   }
 
   function renderSummaryPanel(stats) {
+    if (!panelEnabled) return;
     renderedOrder = getOrderId();
 
     if (stats.total === 0) {
@@ -579,7 +451,7 @@
     const bodyHtml = `
       <table class="bico-stats-table">
         <thead>
-          <tr><th>\uCE74\uD14C\uACE0\uB9AC</th><th>\uAC74\uC218</th><th>\uBE44\uC728</th></tr>
+          <tr><th>\uCE74\uD14C\uACE0\uB9AC</th><th>\uAC74\uC218</th></tr>
         </thead>
         <tbody>
           ${sorted.map(([cat, count]) => `
@@ -589,12 +461,6 @@
                 ${stats.descs[cat] ? `<div class="bico-cat-desc">${escHtml(stats.descs[cat])}</div>` : ''}
               </td>
               <td class="bico-cat-count">${count}</td>
-              <td class="bico-cat-bar">
-                <div class="bico-bar-wrap">
-                  <div class="bico-bar-fill" style="width:${Math.round(count / stats.total * 100)}%"></div>
-                  <span class="bico-bar-pct">${Math.round(count / stats.total * 100)}%</span>
-                </div>
-              </td>
             </tr>
           `).join('')}
         </tbody>
@@ -711,8 +577,7 @@
         padding-bottom: 6px;
         border-bottom: 1px solid #f0f0f0;
       }
-      .bico-stats-table thead th:nth-child(2),
-      .bico-stats-table thead th:nth-child(3) {
+      .bico-stats-table thead th:nth-child(2) {
         text-align: right;
       }
       .bico-stats-table tbody tr {
@@ -724,7 +589,7 @@
         vertical-align: middle;
       }
       .bico-cat-name {
-        max-width: 180px;
+        max-width: 320px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -754,26 +619,6 @@
       .bico-sec-min:hover { color: #000; }
       .bico-sec-body { padding: 12px 14px 8px; }
       .bico-note { color: #888; font-size: 12px; padding-bottom: 4px; }
-      .bico-diag-btn {
-        margin: 4px 0 6px;
-        padding: 4px 10px;
-        border: 1px solid #ccc;
-        background: #fff;
-        border-radius: 4px;
-        font-size: 11px;
-        cursor: pointer;
-      }
-      .bico-channel-main { font-size: 16px; font-weight: 700; }
-      .bico-channel-sub { font-size: 11px; color: #888; margin-top: 2px; padding-bottom: 4px; }
-      .bico-warn {
-        margin: 6px 0 4px;
-        padding: 6px 8px;
-        background: #d32f2f;
-        color: #fff;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: 600;
-      }
       .bico-cat-code { font-weight: 600; }
       .bico-cat-desc {
         font-size: 11px;
@@ -786,28 +631,8 @@
         text-align: right;
         font-weight: 700;
         color: #111;
-        padding-right: 12px;
         white-space: nowrap;
         min-width: 32px;
-      }
-      .bico-cat-bar { width: 140px; }
-      .bico-bar-wrap {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .bico-bar-fill {
-        height: 6px;
-        background: #1a1a1a;
-        border-radius: 3px;
-        min-width: 2px;
-        flex-shrink: 0;
-        transition: width 0.3s ease;
-      }
-      .bico-bar-pct {
-        font-size: 11px;
-        color: #999;
-        white-space: nowrap;
       }
       .bico-panel-footer {
         margin-top: 8px;
